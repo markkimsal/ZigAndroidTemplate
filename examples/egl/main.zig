@@ -74,7 +74,7 @@ pub const AndroidApp = struct {
     /// Uninitialize the application.
     /// Don't forget to stop your background thread here!
     pub fn deinit(self: *Self) void {
-        @atomicStore(bool, &self.running, false, .SeqCst);
+        @atomicStore(bool, &self.running, false, .seq_cst);
         if (self.thread) |thread| {
             thread.join();
             self.thread = null;
@@ -203,14 +203,14 @@ pub const AndroidApp = struct {
             var native_activity = NativeActivity.init(self.activity);
             defer native_activity.deinit();
 
-            var codepoint = try native_activity.AndroidGetUnicodeChar(
+            const codepoint = try native_activity.AndroidGetUnicodeChar(
                 android.AKeyEvent_getKeyCode(event),
                 android.AKeyEvent_getMetaState(event),
             );
             var buf: [8]u8 = undefined;
 
-            var len = std.unicode.utf8Encode(codepoint, &buf) catch 0;
-            var key_text = buf[0..len];
+            const len = std.unicode.utf8Encode(codepoint, &buf) catch 0;
+            const key_text = buf[0..len];
 
             std.log.scoped(.input).info("Pressed key: '{s}' U+{X}", .{ key_text, codepoint });
         }
@@ -301,7 +301,7 @@ pub const AndroidApp = struct {
         });
 
         var i: usize = 0;
-        var cnt = android.AMotionEvent_getPointerCount(event);
+        const cnt = android.AMotionEvent_getPointerCount(event);
         while (i < cnt) : (i += 1) {
             std.log.scoped(.input).debug(
                 \\Pointer {}:
@@ -360,7 +360,7 @@ pub const AndroidApp = struct {
         app_log.info("mainLoop() started\n", .{});
 
         self.config = blk: {
-            var cfg = android.AConfiguration_new() orelse return error.OutOfMemory;
+            const cfg = android.AConfiguration_new() orelse return error.OutOfMemory;
             android.AConfiguration_fromAssetManager(cfg, self.activity.assetManager);
             break :blk cfg;
         };
@@ -412,7 +412,7 @@ pub const AndroidApp = struct {
             1.0, 1.0,
         };
 
-        while (@atomicLoad(bool, &self.running, .SeqCst)) {
+        while (@atomicLoad(bool, &self.running, .seq_cst)) {
             // Input process
             {
                 // we lock the handle of our input so we don't have a race condition
@@ -468,8 +468,8 @@ pub const AndroidApp = struct {
 
                         touch_program = c.glCreateProgram();
                         {
-                            var ps = c.glCreateShader(c.GL_VERTEX_SHADER);
-                            var fs = c.glCreateShader(c.GL_FRAGMENT_SHADER);
+                            const ps = c.glCreateShader(c.GL_VERTEX_SHADER);
+                            const fs = c.glCreateShader(c.GL_FRAGMENT_SHADER);
 
                             var ps_code =
                                 \\attribute vec2 vPosition;
@@ -536,8 +536,8 @@ pub const AndroidApp = struct {
 
                         shaded_program = c.glCreateProgram();
                         {
-                            var ps = c.glCreateShader(c.GL_VERTEX_SHADER);
-                            var fs = c.glCreateShader(c.GL_FRAGMENT_SHADER);
+                            const ps = c.glCreateShader(c.GL_VERTEX_SHADER);
+                            const fs = c.glCreateShader(c.GL_FRAGMENT_SHADER);
 
                             var ps_code =
                                 \\#version 100
@@ -707,9 +707,9 @@ const Vector4 = extern struct {
 
     fn readFromSlice(slice: []const u8) Vector4 {
         return Vector4{
-            .x = @as(f32, @bitCast(std.mem.readIntLittle(u32, slice[0..4]))),
-            .y = @as(f32, @bitCast(std.mem.readIntLittle(u32, slice[4..8]))),
-            .z = @as(f32, @bitCast(std.mem.readIntLittle(u32, slice[8..12]))),
+            .x = @as(f32, @bitCast(std.mem.readPackedInt(u32, slice[0..4], 0, .little))),
+            .y = @as(f32, @bitCast(std.mem.readPackedInt(u32, slice[4..8], 0, .little))),
+            .z = @as(f32, @bitCast(std.mem.readPackedInt(u32, slice[8..12], 0, .little))),
             .w = 1.0,
         };
     }
@@ -718,7 +718,9 @@ const Vector4 = extern struct {
 const mesh = blk: {
     const stl_data = @embedFile("logo.stl");
 
-    const count = std.mem.readIntLittle(u32, stl_data[80..][0..4]);
+
+// pub fn readPackedInt(comptime T: type, bytes: []const u8, bit_offset: usize, endian: Endian) T {
+    const count = std.mem.readPackedInt(u32, stl_data[80..][0..4], 0, .little);
 
     var slice: []const u8 = stl_data[84..];
 
@@ -732,7 +734,7 @@ const mesh = blk: {
         const v1 = Vector4.readFromSlice(slice[12..]);
         const v2 = Vector4.readFromSlice(slice[24..]);
         const v3 = Vector4.readFromSlice(slice[36..]);
-        const attrib_count = std.mem.readIntLittle(u16, slice[48..50]);
+        const attrib_count = std.mem.readPackedInt(u16, slice[48..50], 0, .little);
 
         array[3 * index + 0] = MeshVertex{
             .pos = v1,
@@ -844,7 +846,7 @@ const Oscillator = struct {
     amplitude: f64 = 0.1,
 
     fn setWaveOn(self: *@This(), isWaveOn: bool) void {
-        @atomicStore(bool, &self.isWaveOn, isWaveOn, .SeqCst);
+        @atomicStore(bool, &self.isWaveOn, isWaveOn, .seq_cst);
     }
 
     fn setSampleRate(self: *@This(), sample_rate: i32) void {
@@ -852,10 +854,10 @@ const Oscillator = struct {
     }
 
     fn renderf32(self: *@This(), audio_data: []f32) void {
-        if (!@atomicLoad(bool, &self.isWaveOn, .SeqCst)) self.phase = 0;
+        if (!@atomicLoad(bool, &self.isWaveOn, .seq_cst)) self.phase = 0;
 
         for (audio_data) |*frame| {
-            if (@atomicLoad(bool, &self.isWaveOn, .SeqCst)) {
+            if (@atomicLoad(bool, &self.isWaveOn, .seq_cst)) {
                 frame.* += @as(f32, @floatCast(std.math.sin(self.phase) * self.amplitude));
                 self.phase += self.phaseIncrement;
                 if (self.phase > std.math.tau) self.phase -= std.math.tau;
@@ -864,10 +866,10 @@ const Oscillator = struct {
     }
 
     fn renderi16(self: *@This(), audio_data: []i16) void {
-        if (!@atomicLoad(bool, &self.isWaveOn, .SeqCst)) self.phase = 0;
+        if (!@atomicLoad(bool, &self.isWaveOn, .seq_cst)) self.phase = 0;
 
         for (audio_data) |*frame| {
-            if (@atomicLoad(bool, &self.isWaveOn, .SeqCst)) {
+            if (@atomicLoad(bool, &self.isWaveOn, .seq_cst)) {
                 frame.* +|= @as(i16, @intFromFloat(@as(f32, @floatCast(std.math.sin(self.phase) * self.amplitude)) * std.math.maxInt(i16)));
                 self.phase += self.phaseIncrement;
                 if (self.phase > std.math.tau) self.phase -= std.math.tau;

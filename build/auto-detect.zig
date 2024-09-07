@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const Builder = std.build.Builder;
+const Builder = std.Build;
 
 const Sdk = @import("../Sdk.zig");
 const UserConfig = Sdk.UserConfig;
@@ -32,7 +32,7 @@ pub fn findUserConfig(b: *Builder, versions: Sdk.ToolchainVersions) !UserConfig 
         var scanner = std.json.Scanner.initCompleteInput(b.allocator, bytes);
         var diagnostics = std.json.Diagnostics{};
         scanner.enableDiagnostics(&diagnostics);
-        var parsed = std.json.parseFromTokenSource(UserConfig, b.allocator, &scanner, .{}) catch |err| {
+        const parsed = std.json.parseFromTokenSource(UserConfig, b.allocator, &scanner, .{}) catch |err| {
             std.debug.print("Could not parse {s}: line,col: {},{}\n", .{ config_path, diagnostics.getLine(), diagnostics.getColumn() });
             return err;
         };
@@ -158,7 +158,7 @@ pub fn findUserConfig(b: *Builder, versions: Sdk.ToolchainVersions) !UserConfig 
         };
 
         // Get the android studio registry entry
-        var android_studio_key: HKEY = for ([_]HKEY{ HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE }) |root_key| {
+        const android_studio_key: HKEY = for ([_]HKEY{ HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE }) |root_key| {
             var software: HKEY = null;
             if (reg.RegOpenKeyA(root_key, "software", &software) == ERROR_SUCCESS) {
                 defer _ = reg.RegCloseKey(software);
@@ -370,7 +370,7 @@ pub fn findUserConfig(b: *Builder, versions: Sdk.ToolchainVersions) !UserConfig 
             print("\n", .{});
         }
 
-        std.os.exit(1);
+        std.process.exit(1);
     }
 
     if (config_dirty) {
@@ -386,7 +386,7 @@ pub fn findProgramPath(allocator: std.mem.Allocator, program: []const u8) ?[]con
     else
         &[_][]const u8{ "which", program };
 
-    var proc = std.ChildProcess.init(args, allocator);
+    var proc = std.process.Child.init(args, allocator);
 
     proc.stderr_behavior = .Close;
     proc.stdout_behavior = .Pipe;

@@ -31,7 +31,7 @@ pub fn toolchainHostTag() []const u8 {
 const Sdk = @This();
 
 /// The builder instance associated with this object.
-b: *Builder,
+b: *std.Build,
 
 /// A set of tools that run on the build host that are required to complete the
 /// project build. Must be created with the `hostTools()` function that passes in
@@ -91,18 +91,19 @@ pub fn init(b: *Builder, user_config: ?UserConfig, toolchains: ToolchainVersions
     // Compiles all required additional tools for toolchain.
     const host_tools = blk: {
         const zip_add = b.addExecutable(.{
+            .target = b.standardTargetOptions(.{}),
             .name = "zip_add",
-            .root_source_file = .{ .path = sdkRoot() ++ "/tools/zip_add.zig" },
+            .root_source_file = .{ .cwd_relative = sdkRoot() ++ "/tools/zip_add.zig" },
         });
         zip_add.addCSourceFile(.{
-            .file = .{ .path = sdkRoot() ++ "/vendor/kuba-zip/zip.c" },
+            .file = .{ .cwd_relative = sdkRoot() ++ "/vendor/kuba-zip/zip.c" },
             .flags = &[_][]const u8{
                 "-std=c99",
                 "-fno-sanitize=undefined",
                 "-D_POSIX_C_SOURCE=200112L",
             },
         });
-        zip_add.addIncludePath(.{ .path = sdkRoot() ++ "/vendor/kuba-zip" });
+        zip_add.addIncludePath(.{ .cwd_relative =  sdkRoot() ++ "/vendor/kuba-zip" });
         zip_add.linkLibC();
 
         break :blk HostTools{
@@ -122,7 +123,7 @@ pub fn init(b: *Builder, user_config: ?UserConfig, toolchains: ToolchainVersions
 }
 
 pub const ToolchainVersions = struct {
-    build_tools_version: []const u8 = "33.0.1",
+    build_tools_version: []const u8 = "33.0.0",
     ndk_version: []const u8 = "24.0.8215888",
 };
 
@@ -177,7 +178,7 @@ pub const Resource = struct {
     /// This is the relative path to the resource root
     path: []const u8,
     /// This is the content of the file.
-    content: std.build.FileSource,
+    content: std.Build.LazyPath,
 };
 
 /// Configuration of an application.
@@ -231,7 +232,7 @@ pub const KeyStore = struct {
 };
 
 pub const HostTools = struct {
-    zip_add: *std.build.LibExeObjStep,
+    zip_add: *std.Build.Step.Compile,
 };
 
 /// Configuration of the binary paths to all tools that are not included in the android SDK.
@@ -258,21 +259,21 @@ pub const AppTargetConfig = struct {
 
 pub const CreateAppStep = struct {
     sdk: *Sdk,
-    first_step: *std.build.Step,
-    final_step: *std.build.Step,
+    first_step: *std.Build.Step,
+    final_step: *std.Build.Step,
 
-    libraries: []const *std.build.LibExeObjStep,
+    libraries: []const *std.Build.Step.Compile,
     build_options: *BuildOptionStep,
 
-    apk_file: std.build.FileSource,
+    apk_file: std.Build.LazyPath,
 
     package_name: []const u8,
 
-    pub fn getAndroidPackage(self: @This(), name: []const u8) std.build.Pkg {
-        return self.sdk.b.dupePkg(std.build.Pkg{
+    pub fn getAndroidPackage(self: @This(), name: []const u8) std.Build.Module {
+        return self.sdk.b.dupePkg(std.Build.Module{
             .name = name,
-            .source = .{ .path = sdkRoot() ++ "/src/android-support.zig" },
-            .dependencies = &[_]std.build.Pkg{
+            .source = .{ .cwd_relative =  sdkRoot() ++ "/src/android-support.zig" },
+            .dependencies = &[_]std.Build.Module{
                 self.build_options.getPackage("build_options"),
             },
         });
@@ -548,7 +549,7 @@ pub fn createApp(
     const unaligned_apk_file = make_unsigned_apk.addOutputFileArg(unaligned_apk_name);
 
     make_unsigned_apk.addArg("-M"); // specify full path to AndroidManifest.xml to include in zip
-    make_unsigned_apk.addFileSourceArg(manifest_step.files.items[0].getPath());
+    make_unsigned_apk.addFileArg(manifest_step.files.items[0].getPath());
 
     make_unsigned_apk.addArg("-S"); // directory in which to find resources.  Multiple directories will be scanned and the first match found (left to right) will take precedence
     make_unsigned_apk.addDirectorySourceArg(resource_dir_step.getOutputDirectory());
@@ -566,7 +567,7 @@ pub fn createApp(
     const copy_to_zip_step = WriteToZip.init(sdk, unaligned_apk_file, unaligned_apk_name);
     copy_to_zip_step.run_step.step.dependOn(&make_unsigned_apk.step);
 
-    var libs = std.ArrayList(*std.build.LibExeObjStep).init(sdk.b.allocator);
+    var libs = std.ArrayList(*std.Build.Step.Compile).init(sdk.b.allocator);
     defer libs.deinit();
 
     const build_options = BuildOptionStep.create(sdk.b);
@@ -575,8 +576,8 @@ pub fn createApp(
     build_options.add(bool, "fullscreen", app_config.fullscreen);
 
     const android_module = sdk.b.addModule("android", .{
-        .source_file = .{ .path = "src/android-support.zig" },
-        .dependencies = &.{.{
+        .root_source_file = .{ .cwd_relative =  "src/android-support.zig" },
+        .imports = &.{.{
             .name = "build_options",
             .module = build_options.getModule(),
         }},
@@ -590,7 +591,7 @@ pub fn createApp(
         "-v", // verbose
         "4",
     });
-    align_step.addFileSourceArg(copy_to_zip_step.output_source);
+    align_step.addFileArg(copy_to_zip_step.output_source);
     align_step.step.dependOn(&make_unsigned_apk.step);
     const apk_file = align_step.addOutputFileArg(apk_filename);
 
@@ -612,13 +613,14 @@ pub fn createApp(
                 "-d",
                 java_dir,
             });
-            javac_cmd.addFileSourceArg(std.build.FileSource.relative(java_file));
+            // javac_cmd.addFileArg(std.Build.LazyPath(.{.cwd_relative = java_file}));
+            javac_cmd.addFileArg(.{.cwd_relative = java_file});
 
             const name = std.fs.path.stem(java_file);
             const name_ext = sdk.b.fmt("{s}.class", .{name});
             const class_file = std.fs.path.resolve(sdk.b.allocator, &[_][]const u8{ java_dir, name_ext }) catch unreachable;
 
-            d8_cmd_builder.addFileSourceArg(.{ .path = class_file });
+            d8_cmd_builder.addFileArg(.{ .cwd_relative = class_file });
             d8_cmd_builder.step.dependOn(&javac_cmd.step);
         }
 
@@ -632,7 +634,7 @@ pub fn createApp(
         const dex_file = std.fs.path.resolve(sdk.b.allocator, &[_][]const u8{ java_dir, "classes.dex" }) catch unreachable;
         // make_unsigned_apk.addArg("-I");
         // make_unsigned_apk.addArg(dex_file);
-        copy_to_zip_step.addFile(.{ .path = dex_file }, "classes.dex");
+        copy_to_zip_step.addFile(.{ .cwd_relative = dex_file }, "classes.dex");
         copy_to_zip_step.run_step.step.dependOn(&make_unsigned_apk.step); // enforces creation of APK before the execution
         align_step.step.dependOn(&copy_to_zip_step.run_step.step);
     }
@@ -648,7 +650,7 @@ pub fn createApp(
     {
         const pass = sdk.b.fmt("pass:{s}", .{key_store.password});
         sign_step.addArgs(&.{ "--ks-pass", pass });
-        sign_step.addFileSourceArg(apk_file);
+        sign_step.addFileArg(apk_file);
     }
 
     inline for (std.meta.fields(AppTargetConfig)) |fld| {
@@ -673,7 +675,7 @@ pub fn createApp(
 
             const target_filename = sdk.b.fmt("{s}lib{s}.so", .{ so_dir, app_config.app_name });
 
-            copy_to_zip_step.addFile(step.getOutputSource(), target_filename);
+            copy_to_zip_step.addFile(step.getEmittedBin(), target_filename);
             copy_to_zip_step.run_step.step.dependOn(&step.step);
             align_step.step.dependOn(&copy_to_zip_step.run_step.step);
         }
@@ -695,13 +697,13 @@ pub fn createApp(
 
 const CreateResourceDirectory = struct {
     const Self = @This();
-    builder: *std.build.Builder,
-    step: std.build.Step,
+    builder: *std.Build,
+    step: std.Build.Step,
 
     resources: std.ArrayList(Resource),
-    directory: std.build.GeneratedFile,
+    directory: std.Build.GeneratedFile,
 
-    pub fn create(b: *std.build.Builder) *Self {
+    pub fn create(b: *std.Build) *Self {
         const self = b.allocator.create(Self) catch @panic("out of memory");
         self.* = Self{
             .builder = b,
@@ -725,13 +727,14 @@ const CreateResourceDirectory = struct {
         resource.content.addStepDependencies(&self.step);
     }
 
-    pub fn getOutputDirectory(self: *Self) std.build.FileSource {
-        return .{ .generated = &self.directory };
+    pub fn getOutputDirectory(self: *Self) std.Build.LazyPath {
+        return .{ .cwd_relative = self.directory.path orelse "" };
+        // return .{ .generated = &self.directory };
     }
 
-    fn make(step: *Step, progress: *std.Progress.Node) !void {
+    fn make(step: *Step, progress: std.Progress.Node) anyerror!void {
         _ = progress;
-        const self = @fieldParentPtr(Self, "step", step);
+        const self: *Self = @fieldParentPtr("step", step);
 
         // if (std.fs.path.dirname(strings_xml)) |dir| {
         //     std.fs.cwd().makePath(dir) catch unreachable;
@@ -763,24 +766,24 @@ const CreateResourceDirectory = struct {
     }
 };
 
-fn run_copy_to_zip(sdk: *Sdk, input_file: std.build.FileSource, apk_file: std.build.FileSource, target_file: []const u8) *std.Build.RunStep {
+fn run_copy_to_zip(sdk: *Sdk, input_file: std.Build.LazyPath, apk_file: std.Build.LazyPath, target_file: []const u8) *std.Build.Step.Run {
     const run_cp = sdk.b.addRunArtifact(sdk.host_tools.zip_add);
 
-    run_cp.addFileSourceArg(apk_file);
-    run_cp.addFileSourceArg(input_file);
+    run_cp.addFileArg(apk_file);
+    run_cp.addFileArg(input_file);
     run_cp.addArg(target_file);
 
     return run_cp;
 }
 
 const WriteToZip = struct {
-    output_source: std.Build.FileSource,
-    run_step: *std.Build.RunStep,
+    output_source: std.Build.LazyPath,
+    run_step: *std.Build.Step.Run,
 
-    pub fn init(sdk: *Sdk, zip_file: std.Build.FileSource, out_name: []const u8) WriteToZip {
+    pub fn init(sdk: *Sdk, zip_file: std.Build.LazyPath, out_name: []const u8) WriteToZip {
         const run_cp = sdk.b.addRunArtifact(sdk.host_tools.zip_add);
 
-        run_cp.addFileSourceArg(zip_file);
+        run_cp.addFileArg(zip_file);
         const output_source = run_cp.addOutputFileArg(out_name);
 
         return WriteToZip{
@@ -789,8 +792,8 @@ const WriteToZip = struct {
         };
     }
 
-    pub fn addFile(step: *const WriteToZip, input_file: std.Build.FileSource, target_file: []const u8) void {
-        step.run_step.addFileSourceArg(input_file);
+    pub fn addFile(step: *const WriteToZip, input_file: std.Build.LazyPath, target_file: []const u8) void {
+        step.run_step.addFileArg(input_file);
         step.run_step.addArg(target_file);
     }
 };
@@ -804,7 +807,7 @@ pub fn compileAppLibrary(
     mode: std.builtin.Mode,
     target: Target,
     // build_options: std.build.Pkg,
-) *std.build.LibExeObjStep {
+) *std.Build.Step.Compile {
     const ndk_root = sdk.b.pathFromRoot(sdk.folders.android_ndk_root);
 
     const TargetConfig = struct {
@@ -862,29 +865,41 @@ pub fn compileAppLibrary(
 
     const exe = sdk.b.addSharedLibrary(.{
         .name = app_config.app_name,
-        .root_source_file = .{ .path = src_file },
-        .target = config.target,
+        .root_source_file = .{ .cwd_relative = src_file },
+        .target = sdk.b.resolveTargetQuery(
+            config.target,
+        ),
+        .pic = true,
+        // .target = sdk.b.standardTargetOptions(.{}),
+        // .target = sdk.b.resolveTargetQuery(sdk.b.standardTargetOptions(.{})),
+        // .target = sdk.b.resolveTargetQuery(.{
+        //     .os_tag = .linux,
+        //     .cpu_arch = .armeb,
+        //     .abi = .android,
+        // }),
         .optimize = mode,
     });
 
     exe.link_emit_relocs = true;
     exe.link_eh_frame_hdr = true;
-    exe.force_pic = true;
+    // exe.pie = true;
+    // exe.force_pic = true;
     exe.link_function_sections = true;
     exe.bundle_compiler_rt = true;
-    exe.strip = (mode == .ReleaseSmall);
+    // exe.dead_strip_dylibs = (mode == .ReleaseSmall);
+    // exe.strip = (mode == .ReleaseSmall);
     exe.export_table = true;
 
     exe.defineCMacro("ANDROID", null);
 
     exe.linkLibC();
     for (app_config.libraries) |lib| {
-        exe.linkSystemLibraryName(lib);
+        exe.linkSystemLibrary(lib);
     }
 
     // exe.addIncludePath(include_dir);
 
-    exe.addLibraryPath(.{ .path = lib_dir });
+    exe.addLibraryPath(.{ .cwd_relative = lib_dir });
 
     // exe.addIncludePath(include_dir);
     // exe.addIncludePath(system_include_dir);
@@ -892,15 +907,15 @@ pub fn compileAppLibrary(
     exe.setLibCFile(sdk.createLibCFile(app_config.target_version, config.out_dir, include_dir, system_include_dir, lib_dir) catch unreachable);
     exe.libc_file.?.addStepDependencies(&exe.step);
 
-    // TODO: Remove when https://github.com/ziglang/zig/issues/7935 is resolved:
-    if (exe.target.getCpuArch() == .x86) {
-        exe.link_z_notext = true;
-    }
+    // // TODO: Remove when https://github.com/ziglang/zig/issues/7935 is resolved:
+    // if (exe.getCpuArch() == .x86) {
+    //     exe.link_z_notext = true;
+    // }
 
     return exe;
 }
 
-fn createLibCFile(sdk: *const Sdk, version: AndroidVersion, folder_name: []const u8, include_dir: []const u8, sys_include_dir: []const u8, crt_dir: []const u8) !std.build.FileSource {
+fn createLibCFile(sdk: *const Sdk, version: AndroidVersion, folder_name: []const u8, include_dir: []const u8, sys_include_dir: []const u8, crt_dir: []const u8) !std.Build.LazyPath {
     const fname = sdk.b.fmt("android-{d}-{s}.conf", .{ @intFromEnum(version), folder_name });
 
     var contents = std.ArrayList(u8).init(sdk.b.allocator);
@@ -961,9 +976,9 @@ pub fn compressApk(sdk: Sdk, input_apk_file: []const u8, output_apk_file: []cons
     return &rmdir_cmd.step;
 }
 
-pub fn installApp(sdk: Sdk, apk_file: std.build.FileSource) *Step {
+pub fn installApp(sdk: Sdk, apk_file: std.Build.LazyPath) *Step {
     const step = sdk.b.addSystemCommand(&[_][]const u8{ sdk.system_tools.adb, "-d", "install" });
-    step.addFileSourceArg(apk_file);
+    step.addFileArg(apk_file);
     return &step.step;
 }
 
@@ -1032,8 +1047,8 @@ pub fn initKeystore(sdk: Sdk, key_store: KeyStore, key_config: KeyConfig) *Step 
     }
 }
 
-const Builder = std.build.Builder;
-const Step = std.build.Step;
+const Builder = std.Build;
+const Step = std.Build.Step;
 
 const android_os = .linux;
 const android_abi = .android;
@@ -1076,9 +1091,9 @@ const BuildOptionStep = struct {
     const Self = @This();
 
     step: Step,
-    builder: *std.build.Builder,
+    builder: *std.Build,
     file_content: std.ArrayList(u8),
-    package_file: std.build.GeneratedFile,
+    package_file: std.Build.GeneratedFile,
 
     pub fn create(b: *Builder) *Self {
         const options = b.allocator.create(Self) catch @panic("out of memory");
@@ -1092,10 +1107,13 @@ const BuildOptionStep = struct {
                 .makeFn = make,
             }),
             .file_content = std.ArrayList(u8).init(b.allocator),
-            .package_file = std.build.GeneratedFile{ .step = &options.step },
+            .package_file = std.Build.GeneratedFile{ .step = &options.step },
         };
         const build_options = b.addModule("build_options", .{
-            .source_file = .{ .generated = &options.package_file },
+            .root_source_file = .{ 
+                .cwd_relative = options.package_file.path orelse "",
+                // .generated = options.package_file
+            },
         });
         _ = build_options;
 
@@ -1188,9 +1206,9 @@ const BuildOptionStep = struct {
         out.print("pub const {}: {s} = {};\n", .{ std.zig.fmtId(name), @typeName(T), value }) catch unreachable;
     }
 
-    fn make(step: *Step, progress: *std.Progress.Node) !void {
+    fn make(step: *Step, progress: std.Progress.Node) anyerror!void {
         _ = progress;
-        const self = @fieldParentPtr(Self, "step", step);
+        const self: *Self = @fieldParentPtr("step", step);
 
         var cacher = createCacheBuilder(self.builder);
         cacher.addBytes(self.file_content.items);
@@ -1202,22 +1220,25 @@ const BuildOptionStep = struct {
             "build_options.zig",
         });
 
-        try std.fs.cwd().writeFile(self.package_file.path.?, self.file_content.items);
+        try std.fs.cwd().writeFile(.{
+            .sub_path = self.package_file.path.?,
+            .data = self.file_content.items,
+        });
     }
 };
 
-fn createCacheBuilder(b: *std.build.Builder) CacheBuilder {
+fn createCacheBuilder(b: *std.Build) CacheBuilder {
     return CacheBuilder.init(b, "android-sdk");
 }
 
 const CacheBuilder = struct {
     const Self = @This();
 
-    builder: *std.build.Builder,
+    builder: *std.Build,
     hasher: std.crypto.hash.Sha1,
     subdir: ?[]const u8,
 
-    pub fn init(builder: *std.build.Builder, subdir: ?[]const u8) Self {
+    pub fn init(builder: *std.Build, subdir: ?[]const u8) Self {
         return Self{
             .builder = builder,
             .hasher = std.crypto.hash.Sha1.init(.{}),
@@ -1232,7 +1253,7 @@ const CacheBuilder = struct {
         self.hasher.update(bytes);
     }
 
-    pub fn addFile(self: *Self, file: std.build.FileSource) !void {
+    pub fn addFile(self: *Self, file: std.Build.LazyPath) !void {
         const path = file.getPath(self.builder);
 
         const data = try std.fs.cwd().readFileAlloc(self.builder.allocator, path, 1 << 32); // 4 GB
