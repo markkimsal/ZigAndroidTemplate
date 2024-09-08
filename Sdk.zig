@@ -269,15 +269,15 @@ pub const CreateAppStep = struct {
 
     package_name: []const u8,
 
-    pub fn getAndroidPackage(self: @This(), name: []const u8) std.Build.Module {
-        return self.sdk.b.dupePkg(std.Build.Module{
-            .name = name,
-            .source = .{ .cwd_relative =  sdkRoot() ++ "/src/android-support.zig" },
-            .dependencies = &[_]std.Build.Module{
-                self.build_options.getPackage("build_options"),
-            },
-        });
-    }
+    // pub fn getAndroidPackage(self: @This(), name: []const u8) std.Build.Module {
+    //     return self.sdk.b.dupePkg(std.Build.Module{
+    //         .name = name,
+    //         .source = .{ .cwd_relative =  sdkRoot() ++ "/src/android-support.zig" },
+    //         .dependencies = &[_]std.Build.Module{
+    //             self.build_options.getPackage("build_options"),
+    //         },
+    //     });
+    // }
 
     pub fn install(self: @This()) *Step {
         return self.sdk.installApp(self.apk_file);
@@ -582,7 +582,7 @@ pub fn createApp(
             .module = build_options.getModule(),
         }},
     });
-    _ = android_module;
+    android_module.addImport("build_options", build_options.getModule());
 
     const align_step = sdk.b.addSystemCommand(&[_][]const u8{
         sdk.system_tools.zipalign,
@@ -728,8 +728,7 @@ const CreateResourceDirectory = struct {
     }
 
     pub fn getOutputDirectory(self: *Self) std.Build.LazyPath {
-        return .{ .cwd_relative = self.directory.path orelse "" };
-        // return .{ .generated = &self.directory };
+        return .{ .generated = .{ .file = &self.directory } };
     }
 
     fn make(step: *Step, progress: std.Progress.Node) anyerror!void {
@@ -1111,8 +1110,7 @@ const BuildOptionStep = struct {
         };
         const build_options = b.addModule("build_options", .{
             .root_source_file = .{ 
-                .cwd_relative = options.package_file.path orelse "",
-                // .generated = options.package_file
+                .generated = .{ .file = &options.package_file },
             },
         });
         _ = build_options;
