@@ -22,7 +22,7 @@ pub fn init(jni: *android.JNI, class: android.jobject) !Self {
 
 pub fn createAlloc(self: Self, jni: *android.JNI, alloc: std.mem.Allocator, pointer: ?*anyopaque, function: InvokeFn) !android.jobject {
     // Create a InvocationHandler struct
-    var handler = try alloc.create(InvocationHandler);
+    const handler = try alloc.create(InvocationHandler);
     errdefer alloc.destroy(handler);
     handler.* = .{
         .pointer = pointer,

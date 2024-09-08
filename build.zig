@@ -5,7 +5,7 @@
 const std = @import("std");
 const Sdk = @import("Sdk.zig");
 
-pub fn build(b: *std.build.Builder) !void {
+pub fn build(b: *std.Build) !void {
     // Default-initialize SDK
     const sdk = Sdk.init(b, null, .{});
     const mode = b.standardOptimizeOption(.{});
@@ -45,7 +45,7 @@ pub fn build(b: *std.build.Builder) !void {
         // This is a set of resources. It should at least contain a "mipmap/icon.png" resource that
         // will provide the application icon.
         .resources = &[_]Sdk.Resource{
-            .{ .path = "mipmap/icon.png", .content = .{ .path = "examples/icon.png" } },
+            .{ .path = "mipmap/icon.png", .content = .{ .cwd_relative =  "examples/icon.png" } },
         },
 
         // This is a list of android permissions. Check out the documentation to figure out which you need.
@@ -92,7 +92,7 @@ pub fn build(b: *std.build.Builder) !void {
 
     for (app.libraries) |exe| {
         // Provide the "android" package in each executable we build
-        exe.addModule("android", android_module);
+        exe.root_module.addImport("android", android_module);
     }
 
     // Make the app build when we invoke "zig build" or "zig build install"

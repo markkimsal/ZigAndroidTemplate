@@ -45,7 +45,7 @@ pub const AAudio = struct {
             frame.* = 0;
         }
 
-        var stream_layout = StreamLayout{
+        const stream_layout = StreamLayout{
             .sample_rate = output_stream.config.sample_rate.?,
             .channel_count = @as(usize, @intCast(output_stream.config.channel_count)),
             .buffer = .{ .Int16 = audio_slice },
@@ -112,7 +112,7 @@ pub const AAudio = struct {
         output_stream.config.sample_rate = @as(u32, @intCast(c.AAudioStream_getSampleRate(output_stream.stream)));
         output_stream.config.buffer_size = @as(usize, @intCast(c.AAudioStream_getFramesPerBurst(output_stream.stream)));
 
-        var res = c.AAudioStream_setBufferSizeInFrames(output_stream.stream, @as(i32, @intCast(output_stream.config.buffer_count * output_stream.config.buffer_size.?)));
+        const res = c.AAudioStream_setBufferSizeInFrames(output_stream.stream, @as(i32, @intCast(output_stream.config.buffer_count * output_stream.config.buffer_size.?)));
         if (res < 0) {
             checkResult(res) catch |e| {
                 audio_log.err("Issue with setting buffer size in frames stream: {s}", .{@errorName(e)});
